@@ -1,0 +1,74 @@
+#!/usr/bin/env ruby
+require 'thor'
+require 'yaml'
+require 'csv'
+
+module Overlord
+
+  DEFAULT_CONFIG_FILE_PATH = File.expand_path('../../config/overlord.yml', __FILE__)
+  DEFAULT_PIDS_FILE_PATH = File.expand_path('../../tmp/pids', __FILE__)
+
+  def self.with_config_and_pids_files(options)
+    config_path = File.absolute_path options[:config]
+    pids_path = File.absolute_path options[:pids]
+    File.open(config_path, 'r') do |config_file|
+      config = YAML.load(config_file) || {}
+      if !File.exists?(pids_path)
+        File.open(pids_path, 'w') do |pids_file|
+          yield config_file, config, pids_file, {} if block_given?
+        end
+      else
+        File.open(pids_path, 'r+') do |pids_file|
+          pids = YAML.load(pids_file) || {}
+          pids_file.seek(0, IO::SEEK_SET)
+          pids_file.truncate(0)
+          yield config_file, config, pids_file, pids if block_given?
+        end
+      end
+    end
+  end
+  def self.process_exists?(pid)
+    begin
+      Process.getpgid pid
+      true
+    rescue Errno::ESRCH
+      false
+    end
+  end
+  def self.kill_process(pid) Process.kill('TERM', pid) end
+  def self.force_kill_process(pid) Process.kill('KILL', pid) end
+
+  class App < Thor
+    include Thor::Actions
+
+    def self.with_config
+      method_option :config, :aliases => ['-c'], :default => DEFAULT_CONFIG_FILE_PATH, :desc => "YAML Config file listing applications to manage."
+    end
+    def self.with_pids
+      method_option :pids, :aliases => ['-p'], :default => DEFAULT_PIDS_FILE_PATH, :desc => "Path to SSV file where application PIDs will be saved."
+    end
+
+    desc "status", "Show the status of managed applications."
+    with_config
+    with_pids
+    def status
+      Overlord.with_config_and_pids_files(options) do |config_file, config, pids_file, pids|
+        config.keys.each do |app|
+          if pids[app]
+            if Overlord.process_exists?(pids[app])
+              say "#{app} is running (PID: #{pids[app]})"
+            else
+              say "WARNING: #{app} was supposed to be running on with PID #{pids[app]} but it has died. Updating #{pids_file.path}."
+              pids.delete app
+            end
+          else
+            say "#{app} is not running."
+          end
+        end
+        pids_file.write(YAML.dump(pids)) unless pids.empty?
+      end
+    end
+  end
+end
+
+Overlord::App.start
