@@ -4,7 +4,7 @@ $LOAD_PATH.unshift(lib) unless $LOAD_PATH.include?(lib)
 require 'overlord/version'
 
 Gem::Specification.new do |spec|
-  spec.name          = "overlord"
+  spec.name          = "daemon-overlord"
   spec.version       = Overlord::VERSION
   spec.authors       = ["Dustin Morrill"]
   spec.email         = ["dmorrill10@gmail.com"]
