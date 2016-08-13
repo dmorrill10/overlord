@@ -6,12 +6,18 @@ require 'process_runner'
 
 module Overlord
 
-  DEFAULT_CONFIG_FILE_PATH = File.expand_path('../../config/overlord.yml', __FILE__)
-  DEFAULT_PIDS_FILE_PATH = File.expand_path('../../tmp/pids', __FILE__)
+  DEFAULT_CONFIG_FILE_PATH = File.join(Dir.pwd, 'config/overlord.yml')
+  DEFAULT_PIDS_FILE_PATH = File.join(Dir.pwd, 'tmp/pids')
+  DEFAULT_LOGS_FILE_PATH = File.join(Dir.pwd, 'log')
 
   def self.with_config_and_pids_files(options)
     config_path = File.absolute_path options[:config]
     pids_path = File.absolute_path options[:pids]
+
+    if !File.directory?(File.dirname(pids_path))
+      Dir.mkdir File.dirname(pids_path)
+    end
+
     File.open(config_path, 'r') do |config_file|
       config = YAML.load(config_file) || {}
       if !File.exists?(pids_path)
@@ -40,7 +46,7 @@ module Overlord
   def self.force_kill_process(pid) Process.kill('KILL', pid) end
 
   module Actions
-    def start_daemon(app, config, pids, pids_file_path)
+    def start_daemon(app, config, pids, pids_file_path, log_directory = nil, merge_out_and_err = nil)
       if pids[app]
         if Overlord.process_exists?(pids[app])
           say "WARNING: #{app} is already started (PID: #{pids[app]})."
@@ -52,10 +58,25 @@ module Overlord
       end
       command = config[app]
 
+      options = {}
+      if log_directory
+        if !File.directory?(log_directory)
+          say_status :mkdir, "Creating log directory, \"#{log_directory}\"."
+          Dir.mkdir log_directory
+        end
+        if merge_out_and_err
+          options[:err] = :out
+          options[:out] = [File.join(log_directory, "#{app}.log"), 'a']
+        else
+          options[:err] = [File.join(log_directory, "#{app}.log.e"), 'a']
+          options[:out] = [File.join(log_directory, "#{app}.log.o"), 'a']
+        end
+      end
+
       desc = "`#{command}` from #{Dir.pwd}"
 
       say_status :run_as_daemon, desc
-      pid = Process.detach(Process.spawn(command)).pid
+      pid = Process.detach(Process.spawn(command, options)).pid
       pids[app] = pid
       say_status :start, "#{app} started with PID #{pid}."
     end
@@ -95,6 +116,12 @@ module Overlord
     def self.with_pids
       method_option :pids, :aliases => ['-p'], :default => DEFAULT_PIDS_FILE_PATH, :desc => "Path to SSV file where application PIDs will be saved."
     end
+    def self.with_logs
+      method_option :logs, :aliases => ['-l'], :default => DEFAULT_LOGS_FILE_PATH, :desc => "Path to a directory where application standard out and error will be logged."
+    end
+    def self.with_merge_stdout_and_stderr
+      method_option :merge, :type => :boolean, :aliases => ['-m'], :default => true, :desc => "Log application standard out and error together."
+    end
 
     desc "status", "Show the status of managed applications."
     with_config
@@ -120,14 +147,16 @@ module Overlord
     desc "start", "Start an application."
     with_config
     with_pids
+    with_logs
+    with_merge_stdout_and_stderr
     method_option :app, :aliases => ['-a'], :desc => "Application to start. Starts all if none specified."
     def start
       Overlord.with_config_and_pids_files(options) do |config_file, config, pids_file, pids|
         if options[:app]
-          start_daemon(options[:app], config, pids, pids_file.path)
+          start_daemon(options[:app], config, pids, pids_file.path, options[:logs], options[:merge])
         else
           config.keys.each do |app|
-            start_daemon(app, config, pids, pids_file.path)
+            start_daemon(app, config, pids, pids_file.path, options[:logs], options[:merge])
           end
         end
         pids_file.write(YAML.dump(pids)) unless pids.empty?
@@ -154,6 +183,8 @@ module Overlord
     desc "restart", "Restart an application."
     with_config
     with_pids
+    with_logs
+    with_merge_stdout_and_stderr
     method_option :app, :aliases => ['-a'], :desc => "Application to restart. Restarts all if none specified."
     def restart
       stop
