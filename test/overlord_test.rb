@@ -1,11 +1,7 @@
 require 'test_helper'
 
-class OverlordTest < Minitest::Test
-  def test_that_it_has_a_version_number
-    refute_nil ::Overlord::VERSION
-  end
-
-  def test_it_does_something_useful
-    assert false
+describe Overlord do
+  it 'has a version number' do
+    ::Overlord::VERSION.wont_be_nil
   end
 end
