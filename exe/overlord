@@ -2,6 +2,7 @@
 require 'thor'
 require 'yaml'
 require 'csv'
+require 'process_runner'
 
 module Overlord
 
@@ -38,8 +39,55 @@ module Overlord
   def self.kill_process(pid) Process.kill('TERM', pid) end
   def self.force_kill_process(pid) Process.kill('KILL', pid) end
 
+  module Actions
+    def start_daemon(app, config, pids, pids_file_path)
+      if pids[app]
+        if Overlord.process_exists?(pids[app])
+          say "WARNING: #{app} is already started (PID: #{pids[app]})."
+          return
+        else
+          say "WARNING: #{app} was supposed to be running on with PID #{pids[app]} but it has died. Updating #{pids_file_path}."
+          pids.delete app
+        end
+      end
+      command = config[app]
+
+      desc = "`#{command}` from #{Dir.pwd}"
+
+      say_status :run_as_daemon, desc
+      pid = Process.detach(Process.spawn(command)).pid
+      pids[app] = pid
+      say_status :start, "#{app} started with PID #{pid}."
+    end
+
+    def stop_daemon(app, config, pids, pids_file_path)
+      if pids[app]
+        if Overlord.process_exists?(pids[app])
+          Overlord.kill_process pids[app]
+          sleep 1 # Give the process a chance to exit
+
+          if Overlord.process_exists?(pids[app])
+            Overlord.force_kill_process pids[app]
+            sleep 1 # Give the process a chance to exit
+
+            if Overlord.process_exists?(pids[app])
+              say "ERROR: #{app} (PID: #{pids[app]}) could not be stopped."
+            end
+          end
+        else
+          say "WARNING: #{app} was supposed to be running on with PID #{pids[app]} but it has died. Updating #{pids_file_path}."
+        end
+        say_status :stop, "#{app} stopped."
+        pids.delete app
+      else
+        say "WARNING: #{app} was not running."
+      end
+    end
+  end
+
   class App < Thor
     include Thor::Actions
+    include Actions
 
     def self.with_config
       method_option :config, :aliases => ['-c'], :default => DEFAULT_CONFIG_FILE_PATH, :desc => "YAML Config file listing applications to manage."
@@ -56,7 +104,7 @@ module Overlord
         config.keys.each do |app|
           if pids[app]
             if Overlord.process_exists?(pids[app])
-              say "#{app} is running (PID: #{pids[app]})"
+              say "#{app} is running (PID: #{pids[app]})."
             else
               say "WARNING: #{app} was supposed to be running on with PID #{pids[app]} but it has died. Updating #{pids_file.path}."
               pids.delete app
@@ -67,6 +115,49 @@ module Overlord
         end
         pids_file.write(YAML.dump(pids)) unless pids.empty?
       end
+    end
+
+    desc "start", "Start an application."
+    with_config
+    with_pids
+    method_option :app, :aliases => ['-a'], :desc => "Application to start. Starts all if none specified."
+    def start
+      Overlord.with_config_and_pids_files(options) do |config_file, config, pids_file, pids|
+        if options[:app]
+          start_daemon(options[:app], config, pids, pids_file.path)
+        else
+          config.keys.each do |app|
+            start_daemon(app, config, pids, pids_file.path)
+          end
+        end
+        pids_file.write(YAML.dump(pids)) unless pids.empty?
+      end
+    end
+
+    desc "stop", "Stop an application."
+    with_config
+    with_pids
+    method_option :app, :aliases => ['-a'], :desc => "Application to stop. Stops all if none specified."
+    def stop
+      Overlord.with_config_and_pids_files(options) do |config_file, config, pids_file, pids|
+        if options[:app]
+          stop_daemon(options[:app], config, pids, pids_file.path)
+        else
+          config.keys.each do |app|
+            stop_daemon(app, config, pids, pids_file.path)
+          end
+        end
+        pids_file.write(YAML.dump(pids)) unless pids.empty?
+      end
+    end
+
+    desc "restart", "Restart an application."
+    with_config
+    with_pids
+    method_option :app, :aliases => ['-a'], :desc => "Application to restart. Restarts all if none specified."
+    def restart
+      stop
+      start
     end
   end
 end
