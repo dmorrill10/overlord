@@ -10,7 +10,7 @@ Gem::Specification.new do |spec|
   spec.email         = ["dmorrill10@gmail.com"]
 
   spec.summary       = %q{Start and stop daemons with minimal monitoring.}
-  spec.homepage      = "TODO: Put your gem's website or public repo URL here."
+  spec.homepage      = "https://github.com/dmorrill10/overlord"
   spec.license       = "MIT"
 
   spec.files         = `git ls-files -z`.split("\x0").reject { |f| f.match(%r{^(test|spec|features)/}) }
