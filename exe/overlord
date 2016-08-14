@@ -19,14 +19,14 @@ module Overlord
     end
 
     File.open(config_path, 'r') do |config_file|
-      config = YAML.load(config_file) || {}
+      config = YAML.safe_load(config_file) || {}
       if !File.exists?(pids_path)
         File.open(pids_path, 'w') do |pids_file|
           yield config_file, config, pids_file, {} if block_given?
         end
       else
         File.open(pids_path, 'r+') do |pids_file|
-          pids = YAML.load(pids_file) || {}
+          pids = YAML.safe_load(pids_file) || {}
           pids_file.seek(0, IO::SEEK_SET)
           pids_file.truncate(0)
           yield config_file, config, pids_file, pids if block_given?
